@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticker Flotante - José Méndez</title>
+    <style>
+        :root {
+            --bg-color: #000;
+            --text-color: #fff;
+            --up-color: #00ff00; /* Verde neón */
+            --down-color: #ff4444; /* Rojo brillante */
+            --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            --ticker-height: 40px; /* Altura más reducida */
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            background-color: transparent; /* Permite efecto flotante */
+            overflow: hidden;
+            font-family: var(--font-family);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Contenedor del Ticker (Súper Reducido) --- */
+        .ticker-container {
+            width: 100%;
+            height: var(--ticker-height);
+            background: rgba(0, 0, 0, 0.9); /* Fondo semi-transparente */
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            white-space: nowrap;
+            overflow: hidden;
+            position: relative;
+            cursor: grab; /* Indica que se puede mover */
+        }
+
+        .ticker-wrapper {
+            display: inline-block;
+            padding-left: 100%;
+            animation: scroll-left 40s linear infinite; /* Animación más suave */
+        }
+
+        .stock-item {
+            display: inline-block;
+            margin-right: 60px;
+            font-size: 1rem;
+            font-weight: bold;
+            color: var(--text-color);
+        }
+
+        .price-up { color: var(--up-color); }
+        .price-down { color: var(--down-color); }
+        .symbol-name { color: #aaa; font-weight: normal; margin-right: 5px; }
+
+        @keyframes scroll-left {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-100%); }
+        }
+
+        /* --- Panel de Configuración Auto-ocultable --- */
+        .config-panel {
+            background: rgba(34, 34, 34, 0.95);
+            color: #ccc;
+            padding: 8px 15px;
+            font-size: 0.8rem;
+            border-top: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            box-sizing: border-box;
+            transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out;
+            z-index: 100;
+        }
+
+        /* Clase para ocultar el panel */
+        .config-panel.hidden {
+            transform: translateY(100%);
+            opacity: 0;
+            pointer-events: none; /* Evita clics cuando está oculto */
+        }
+
+        .config-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        input {
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 200px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .credits {
+            font-style: italic;
+            color: #888;
+        }
+
+        /* Ajuste para móvil: panel más vertical */
+        @media (max-width: 600px) {
+            .config-panel {
+                flex-direction: column;
+                gap: 8px;
+                text-align: center;
+            }
+            input { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ticker-container" id="tickerContainer">
+        <div id="ticker" class="ticker-wrapper">
+            Obteniendo datos de Finnhub...
+        </div>
+    </div>
+
+    <div class="config-panel" id="configPanel">
+        <div class="config-group">
+            <label>Portafolio:</label>
+            <input type="text" id="symbolsInput" value="AAPL,MSFT,TSLA,GOOGL,AMZN,NVDA">
+            <button onclick="updateTicker()">Actualizar</button>
+        </div>
+        <div class="credits">Autor: José Méndez</div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN ---
+        // IMPORTANTE: Regístrate en finnhub.io y pega tu clave aquí
+        const API_KEY = 'd7bicq1r01qgc9t7h3tgd7bicq1r01qgc9t7h3u0'; 
+        const REFRESH_INTERVAL = 60000; // Actualizar cada 60 segundos (para no agotar la API gratuita)
+        const HIDE_DELAY = 5000; // Tiempo para ocultar el panel (5 segundos)
+
+        let hideTimeout;
+        const configPanel = document.getElementById('configPanel');
+
+        // --- FUNCIONES DEL PANEL AUTO-OCULTABLE ---
+        function showPanel() {
+            configPanel.classList.remove('hidden');
+            resetHideTimeout();
+        }
+
+        function hidePanel() {
+            configPanel.classList.add('hidden');
+        }
+
+        function resetHideTimeout() {
+            clearTimeout(hideTimeout);
+            hideTimeout = setTimeout(hidePanel, HIDE_DELAY);
+        }
+
+        // Detectar toques o clics en cualquier lugar
+        document.addEventListener('mousemove', showPanel);
+        document.addEventListener('click', showPanel);
+        document.addEventListener('touchstart', showPanel);
+
+        // Inicializar el temporizador al cargar
+        resetHideTimeout();
+
+
+        // --- FUNCIONES DEL TICKER ---
+        async function fetchStocks() {
+            const symbols = document.getElementById('symbolsInput').value.split(',').map(s => s.trim().toUpperCase());
+            const ticker = document.getElementById('ticker');
+            
+            if (API_KEY === 'TU_NUEVA_CLAVE_DE_FINNHUB_AQUÍ' || API_KEY === '') {
+                ticker.innerText = "Error: Por favor, añade tu clave API de Finnhub en el código.";
+                return;
+            }
+
+            ticker.innerHTML = 'Actualizando...';
+            const stockData = [];
+
+            // Finnhub requiere una petición por símbolo en el plan gratuito
+            for (const symbol of symbols) {
+                if (!symbol) continue;
+                const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEY}`;
+                
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    if (data && data.c !== 0) { // 'c' es el precio actual
+                        stockData.push({
+                            symbol: symbol,
+                            current: data.c,
+                            change: data.d, // 'd' es el cambio del día
+                            percentChange: data.dp // 'dp' es el cambio porcentual
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error con ${symbol}:`, error);
+                }
+            }
+
+            if (stockData.length > 0) {
+                renderTicker(stockData);
+            } else {
+                ticker.innerText = "No se encontraron datos. Revisa los símbolos o tu clave API.";
+            }
+        }
+
+        function renderTicker(stocks) {
+            const ticker = document.getElementById('ticker');
+            ticker.innerHTML = '';
+
+            // Duplicamos los elementos para crear el efecto infinito
+            const allStocks = [...stocks, ...stocks];
+
+            allStocks.forEach(stock => {
+                const change = stock.change.toFixed(2);
+                const percent = stock.percentChange.toFixed(2);
+                const isUp = stock.change >= 0;
+                
+                const colorClass = isUp ? 'price-up' : 'price-down';
+                const sign = isUp ? '+' : '';
+                const arrow = isUp ? '▲' : '▼';
+
+                const item = document.createElement('span');
+                item.className = 'stock-item';
+                item.innerHTML = `
+                    <span class="symbol-name">${stock.symbol}</span>
+                    <span class="${colorClass}">$${stock.current.toFixed(2)}</span>
+                    <span class="${colorClass}" style="font-size: 0.8rem; margin-left: 5px;">
+                        ${arrow} ${sign}${change} (${sign}${percent}%)
+                    </span>
+                `;
+                ticker.appendChild(item);
+            });
+            
+            // Reiniciar animación para que el navegador reconozca el nuevo ancho
+            ticker.style.animation = 'none';
+            ticker.offsetHeight; 
+            ticker.style.animation = null;
+        }
+
+        function updateTicker() {
+            fetchStocks();
+            hidePanel(); // Ocultar panel al actualizar
+        }
+
+        // Cargar al inicio y actualizar periódicamente
+        fetchStocks();
+        setInterval(fetchStocks, REFRESH_INTERVAL); 
+    </script>
+</body>
+</html>
